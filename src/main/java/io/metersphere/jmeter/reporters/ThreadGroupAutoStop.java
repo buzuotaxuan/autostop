@@ -48,6 +48,9 @@ public class ThreadGroupAutoStop
     public void sampleOccurred(SampleEvent se) {
         AbstractThreadGroup threadGroup = JMeterContextService.getContext().getThreadGroup();
         if (threadGroup instanceof ThreadGroup) {
+            if (!((ThreadGroup) threadGroup).getScheduler()) {
+                return;
+            }
             long duration = ((ThreadGroup) threadGroup).getDuration();
             long offset = System.currentTimeMillis() / 1000 - (startTime + duration);
             if (offset >= 0) {
