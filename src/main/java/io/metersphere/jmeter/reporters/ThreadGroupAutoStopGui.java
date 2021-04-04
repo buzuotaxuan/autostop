@@ -70,6 +70,6 @@ public class ThreadGroupAutoStopGui extends AbstractListenerGui {
 
         JPanel container = new JPanel(new BorderLayout());
         container.add(autoStopPanel, BorderLayout.NORTH);
-        add(container, BorderLayout.WEST);
+        add(container, BorderLayout.CENTER);
     }
 }
