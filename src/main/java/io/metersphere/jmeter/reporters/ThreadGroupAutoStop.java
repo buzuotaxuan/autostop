@@ -23,6 +23,7 @@ import java.net.InetAddress;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class ThreadGroupAutoStop
         extends AbstractListenerElement
@@ -35,6 +36,9 @@ public class ThreadGroupAutoStop
     private long startTime = 0;
     private int stopTries = 0;
     private int delaySeconds = 0;
+    private AtomicBoolean once = new AtomicBoolean(false);
+    private ScheduledExecutorService executorService = Executors.newSingleThreadScheduledExecutor();
+
 
     public ThreadGroupAutoStop() {
         super();
@@ -46,11 +50,13 @@ public class ThreadGroupAutoStop
         if (threadGroup instanceof ThreadGroup) {
             long duration = ((ThreadGroup) threadGroup).getDuration();
             long offset = System.currentTimeMillis() / 1000 - (startTime + duration);
-            System.out.println(offset);
             if (offset >= 0) {
-                ScheduledExecutorService executorService = Executors.newSingleThreadScheduledExecutor();
-                executorService.schedule(threadGroup::stop, delaySeconds, TimeUnit.SECONDS);
-                log.info("Expected duration reached, shutdown the ThreadGroup");
+                if (!once.getAndSet(true)) {
+                    executorService.schedule(() -> {
+                        threadGroup.tellThreadsToStop();
+                        log.info("Expected duration reached, shutdown the ThreadGroup");
+                    }, delaySeconds, TimeUnit.SECONDS);
+                }
             }
         }
         if (threadGroup instanceof ConcurrencyThreadGroup) {
@@ -58,10 +64,12 @@ public class ThreadGroupAutoStop
             long rampUpSeconds = ((ConcurrencyThreadGroup) threadGroup).getRampUpSeconds();
             long offset = System.currentTimeMillis() / 1000 - (startTime + holdSeconds + rampUpSeconds);
             if (offset >= 0) {
-                ScheduledExecutorService executorService = Executors.newSingleThreadScheduledExecutor();
-                executorService.schedule(threadGroup::stop, delaySeconds, TimeUnit.SECONDS);
-                log.info("Expected duration reached, shutdown the ConcurrencyThreadGroup");
-                threadGroup.stop();
+                if (!once.getAndSet(true)) {
+                    executorService.schedule(() -> {
+                        threadGroup.tellThreadsToStop();
+                        log.info("Expected duration reached, shutdown the ConcurrencyThreadGroup");
+                    }, delaySeconds, TimeUnit.SECONDS);
+                }
             }
         }
     }
