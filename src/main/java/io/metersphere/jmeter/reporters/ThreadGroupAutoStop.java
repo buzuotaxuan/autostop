@@ -1,43 +1,35 @@
 package io.metersphere.jmeter.reporters;
 
 import com.blazemeter.jmeter.threads.concurrency.ConcurrencyThreadGroup;
-import org.apache.jmeter.JMeter;
-import org.apache.jmeter.engine.StandardJMeterEngine;
 import org.apache.jmeter.engine.util.NoThreadClone;
 import org.apache.jmeter.reporters.AbstractListenerElement;
 import org.apache.jmeter.samplers.Remoteable;
 import org.apache.jmeter.samplers.SampleEvent;
 import org.apache.jmeter.samplers.SampleListener;
 import org.apache.jmeter.testelement.TestStateListener;
+import org.apache.jmeter.testelement.ThreadListener;
 import org.apache.jmeter.threads.AbstractThreadGroup;
 import org.apache.jmeter.threads.JMeterContextService;
 import org.apache.jmeter.threads.ThreadGroup;
-import org.apache.jmeter.util.JMeterUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.Serializable;
-import java.net.DatagramPacket;
-import java.net.DatagramSocket;
-import java.net.InetAddress;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
+import java.util.Timer;
+import java.util.TimerTask;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class ThreadGroupAutoStop
         extends AbstractListenerElement
         implements SampleListener, Serializable,
-        TestStateListener, Remoteable, NoThreadClone {
+        ThreadListener, TestStateListener, Remoteable, NoThreadClone {
 
     private static final Logger log = LoggerFactory.getLogger(ThreadGroupAutoStop.class);
     private final static String DELAY_SECONDS = "delay_seconds";
-    private long curSec = 0L;
-    private long startTime = 0;
-    private int stopTries = 0;
     private int delaySeconds = 0;
-    private AtomicBoolean once = new AtomicBoolean(false);
-    private ScheduledExecutorService executorService = Executors.newSingleThreadScheduledExecutor();
+    private final AtomicBoolean once = new AtomicBoolean(false);
+    private ConcurrentHashMap<String, Long> threadGroupStartTime = new ConcurrentHashMap<>();
 
 
     public ThreadGroupAutoStop() {
@@ -51,27 +43,35 @@ public class ThreadGroupAutoStop
             if (!((ThreadGroup) threadGroup).getScheduler()) {
                 return;
             }
+            long startTime = threadGroupStartTime.get(threadGroup.getName());
             long duration = ((ThreadGroup) threadGroup).getDuration();
             long offset = System.currentTimeMillis() / 1000 - (startTime + duration);
-            if (offset >= 0) {
+            if (offset >= 0 && startTime > 0) {
                 if (!once.getAndSet(true)) {
-                    executorService.schedule(() -> {
-                        threadGroup.tellThreadsToStop();
-                        log.info("Expected duration reached, shutdown the ThreadGroup");
-                    }, delaySeconds, TimeUnit.SECONDS);
+                    new Timer(true).schedule(new TimerTask() {
+                        public void run() {
+                            threadGroup.tellThreadsToStop();
+                            log.info("Expected duration reached, shutdown the ThreadGroup");
+                            this.cancel();
+                        }
+                    }, delaySeconds * 1000L);
                 }
             }
         }
         if (threadGroup instanceof ConcurrencyThreadGroup) {
+            long startTime = threadGroupStartTime.get(threadGroup.getName() + "-ThreadStarter");
             long holdSeconds = ((ConcurrencyThreadGroup) threadGroup).getHoldSeconds();
             long rampUpSeconds = ((ConcurrencyThreadGroup) threadGroup).getRampUpSeconds();
             long offset = System.currentTimeMillis() / 1000 - (startTime + holdSeconds + rampUpSeconds);
-            if (offset >= 0) {
+            if (offset >= 0 && startTime > 0) {
                 if (!once.getAndSet(true)) {
-                    executorService.schedule(() -> {
-                        threadGroup.tellThreadsToStop();
-                        log.info("Expected duration reached, shutdown the ConcurrencyThreadGroup");
-                    }, delaySeconds, TimeUnit.SECONDS);
+                    new Timer(true).schedule(new TimerTask() {
+                        public void run() {
+                            threadGroup.tellThreadsToStop();
+                            log.info("Expected duration reached, shutdown the ConcurrencyThreadGroup");
+                            this.cancel();
+                        }
+                    }, delaySeconds * 1000L);
                 }
             }
         }
@@ -79,36 +79,11 @@ public class ThreadGroupAutoStop
 
     @Override
     public void sampleStarted(SampleEvent se) {
-        System.out.println("starting....");
     }
 
     @Override
     public void sampleStopped(SampleEvent se) {
-        System.out.println("end....");
     }
-
-    @Override
-    public void testStarted() {
-        curSec = 0;
-        stopTries = 0;
-        startTime = System.currentTimeMillis() / 1000;
-        //init test values
-        delaySeconds = getDelaySecsAsInt();
-    }
-
-    @Override
-    public void testStarted(String string) {
-        testStarted();
-    }
-
-    @Override
-    public void testEnded() {
-    }
-
-    @Override
-    public void testEnded(String string) {
-    }
-
 
     void setDelaySecs(String text) {
         setProperty(DELAY_SECONDS, text);
@@ -130,40 +105,37 @@ public class ThreadGroupAutoStop
         return res > 0 ? res : 30;
     }
 
+    @Override
+    public void threadStarted() {
+        Thread thread = Thread.currentThread();
+        String threadName = thread.getName();
 
-    private void stopTest() {
-        stopTries++;
-
-        if (JMeter.isNonGUI()) {
-            log.info("Stopping JMeter via UDP call");
-            stopTestViaUDP("StopTestNow");
-        } else {
-            if (stopTries > 10) {
-                log.info("Tries more than 10, stop it NOW!");
-                StandardJMeterEngine.stopEngineNow();
-            } else if (stopTries > 5) {
-                log.info("Tries more than 5, stop it!");
-                StandardJMeterEngine.stopEngine();
-            } else {
-                JMeterContextService.getContext().getEngine().askThreadsToStop();
-            }
-        }
+        int x = threadName.lastIndexOf(" ");
+        String threadGroupName = threadName.substring(0, x);
+        threadGroupStartTime.putIfAbsent(threadGroupName, System.currentTimeMillis() / 1000);
     }
 
-    private void stopTestViaUDP(String command) {
-        try {
-            int port = JMeterUtils.getPropDefault("jmeterengine.nongui.port", JMeter.UDP_PORT_DEFAULT);
-            log.info("Sending " + command + " request to port " + port);
-            DatagramSocket socket = new DatagramSocket();
-            byte[] buf = command.getBytes("ASCII");
-            InetAddress address = InetAddress.getByName("localhost");
-            DatagramPacket packet = new DatagramPacket(buf, buf.length, address, port);
-            socket.send(packet);
-            socket.close();
-        } catch (Exception e) {
-            //e.printStackTrace();
-            log.error(e.getMessage());
-        }
+    @Override
+    public void threadFinished() {
+    }
+
+    @Override
+    public void testStarted() {
+        delaySeconds = getDelaySecsAsInt();
+    }
+
+    @Override
+    public void testStarted(String s) {
+
+    }
+
+    @Override
+    public void testEnded() {
+
+    }
+
+    @Override
+    public void testEnded(String s) {
 
     }
 }
