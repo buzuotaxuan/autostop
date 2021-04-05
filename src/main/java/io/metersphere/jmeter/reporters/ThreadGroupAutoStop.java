@@ -52,7 +52,6 @@ public class ThreadGroupAutoStop
             long startTime = threadGroupStartTime.get(threadGroup.getName());
             long duration = ((ThreadGroup) threadGroup).getDuration();
             long offset = System.currentTimeMillis() / 1000 - (startTime + duration);
-            System.out.println("ThreadGroup: " + offset);
 
             if (offset >= 0 && startTime > 0) {
                 if (!once.get(threadGroup).getAndSet(true)) {
@@ -71,7 +70,6 @@ public class ThreadGroupAutoStop
             long holdSeconds = ((ConcurrencyThreadGroup) threadGroup).getHoldSeconds();
             long rampUpSeconds = ((ConcurrencyThreadGroup) threadGroup).getRampUpSeconds();
             long offset = System.currentTimeMillis() / 1000 - (startTime + holdSeconds + rampUpSeconds);
-            System.out.println("ConcurrencyThreadGroup: " + offset);
 
             if (offset >= 0 && startTime > 0) {
                 if (!once.get(threadGroup).getAndSet(true)) {
@@ -98,7 +96,6 @@ public class ThreadGroupAutoStop
             }
             long startTime = threadGroupStartTime.get(threadGroup.getName());
             long offset = System.currentTimeMillis() / 1000 - (startTime + sum);
-            System.out.println("UltimateThreadGroup: " + offset);
             if (offset >= 0 && sum > 0) {
                 if (!once.get(threadGroup).getAndSet(true)) {
                     new Timer(true).schedule(new TimerTask() {
