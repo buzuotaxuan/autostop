@@ -49,63 +49,75 @@ public class ThreadGroupAutoStop
         once.putIfAbsent(threadGroup, new AtomicBoolean(false));
 
         if (threadGroup instanceof ThreadGroup) {
-            long startTime = threadGroupStartTime.get(threadGroup.getName());
-            long duration = ((ThreadGroup) threadGroup).getDuration();
-            long offset = System.currentTimeMillis() / 1000 - (startTime + duration);
-
-            if (offset >= 0 && startTime > 0) {
-                if (!once.get(threadGroup).getAndSet(true)) {
-                    new Timer(true).schedule(new TimerTask() {
-                        public void run() {
-                            threadGroup.tellThreadsToStop();
-                            log.info("Expected duration reached, shutdown the ThreadGroup");
-                            this.cancel();
-                        }
-                    }, delaySeconds * 1000L);
-                }
-            }
+            processThreadGroup(threadGroup);
         }
         if (threadGroup instanceof ConcurrencyThreadGroup) {
-            long startTime = threadGroupStartTime.get(threadGroup.getName() + "-ThreadStarter");
-            long holdSeconds = ((ConcurrencyThreadGroup) threadGroup).getHoldSeconds();
-            long rampUpSeconds = ((ConcurrencyThreadGroup) threadGroup).getRampUpSeconds();
-            long offset = System.currentTimeMillis() / 1000 - (startTime + holdSeconds + rampUpSeconds);
-
-            if (offset >= 0 && startTime > 0) {
-                if (!once.get(threadGroup).getAndSet(true)) {
-                    new Timer(true).schedule(new TimerTask() {
-                        public void run() {
-                            threadGroup.tellThreadsToStop();
-                            log.info("Expected duration reached, shutdown the ConcurrencyThreadGroup");
-                            this.cancel();
-                        }
-                    }, delaySeconds * 1000L);
-                }
-            }
+            processConcurrencyThreadGroup(threadGroup);
         }
         if (threadGroup instanceof UltimateThreadGroup) {
-            JMeterProperty data = ((UltimateThreadGroup) threadGroup).getData();
-            JSONArray jsonArray = JSONArray.fromObject(data.getObjectValue().toString());
-            long sum = 0;
-            for (int i = 0; i < jsonArray.size(); i++) {
-                JSONArray jsonArray1 = jsonArray.getJSONArray(i);
-                long temp = Arrays.stream(jsonArray1.toArray()).skip(1).mapToLong(item -> Long.parseLong(item.toString())).sum();
-                if (temp >= sum) {
-                    sum = temp;
-                }
+            processUltimateThreadGroup(threadGroup);
+        }
+    }
+
+    private void processUltimateThreadGroup(AbstractThreadGroup threadGroup) {
+        JMeterProperty data = ((UltimateThreadGroup) threadGroup).getData();
+        JSONArray jsonArray = JSONArray.fromObject(data.getObjectValue().toString());
+        long sum = 0;
+        for (int i = 0; i < jsonArray.size(); i++) {
+            JSONArray jsonArray1 = jsonArray.getJSONArray(i);
+            long temp = Arrays.stream(jsonArray1.toArray()).skip(1).mapToLong(item -> Long.parseLong(item.toString())).sum();
+            if (temp >= sum) {
+                sum = temp;
             }
-            long startTime = threadGroupStartTime.get(threadGroup.getName());
-            long offset = System.currentTimeMillis() / 1000 - (startTime + sum);
-            if (offset >= 0 && sum > 0) {
-                if (!once.get(threadGroup).getAndSet(true)) {
-                    new Timer(true).schedule(new TimerTask() {
-                        public void run() {
-                            threadGroup.tellThreadsToStop();
-                            log.info("Expected duration reached, shutdown the UltimateThreadGroup");
-                            this.cancel();
-                        }
-                    }, delaySeconds * 1000L);
-                }
+        }
+        long startTime = threadGroupStartTime.get(threadGroup.getName());
+        long offset = System.currentTimeMillis() / 1000 - (startTime + sum);
+        if (offset >= 0 && sum > 0) {
+            if (!once.get(threadGroup).getAndSet(true)) {
+                new Timer(true).schedule(new TimerTask() {
+                    public void run() {
+                        threadGroup.tellThreadsToStop();
+                        log.info("Expected duration reached, shutdown the UltimateThreadGroup");
+                        this.cancel();
+                    }
+                }, delaySeconds * 1000L);
+            }
+        }
+    }
+
+    private void processConcurrencyThreadGroup(AbstractThreadGroup threadGroup) {
+        long startTime = threadGroupStartTime.get(threadGroup.getName() + "-ThreadStarter");
+        long holdSeconds = ((ConcurrencyThreadGroup) threadGroup).getHoldSeconds();
+        long rampUpSeconds = ((ConcurrencyThreadGroup) threadGroup).getRampUpSeconds();
+        long offset = System.currentTimeMillis() / 1000 - (startTime + holdSeconds + rampUpSeconds);
+
+        if (offset >= 0 && startTime > 0) {
+            if (!once.get(threadGroup).getAndSet(true)) {
+                new Timer(true).schedule(new TimerTask() {
+                    public void run() {
+                        threadGroup.tellThreadsToStop();
+                        log.info("Expected duration reached, shutdown the ConcurrencyThreadGroup");
+                        this.cancel();
+                    }
+                }, delaySeconds * 1000L);
+            }
+        }
+    }
+
+    private void processThreadGroup(AbstractThreadGroup threadGroup) {
+        long startTime = threadGroupStartTime.get(threadGroup.getName());
+        long duration = ((ThreadGroup) threadGroup).getDuration();
+        long offset = System.currentTimeMillis() / 1000 - (startTime + duration);
+
+        if (offset >= 0 && startTime > 0) {
+            if (!once.get(threadGroup).getAndSet(true)) {
+                new Timer(true).schedule(new TimerTask() {
+                    public void run() {
+                        threadGroup.tellThreadsToStop();
+                        log.info("Expected duration reached, shutdown the ThreadGroup");
+                        this.cancel();
+                    }
+                }, delaySeconds * 1000L);
             }
         }
     }
