@@ -1,6 +1,8 @@
 package io.metersphere.jmeter.reporters;
 
 import com.blazemeter.jmeter.threads.concurrency.ConcurrencyThreadGroup;
+import kg.apc.jmeter.threads.UltimateThreadGroup;
+import net.sf.json.JSONArray;
 import org.apache.jmeter.engine.util.NoThreadClone;
 import org.apache.jmeter.reporters.AbstractListenerElement;
 import org.apache.jmeter.samplers.Remoteable;
@@ -8,6 +10,7 @@ import org.apache.jmeter.samplers.SampleEvent;
 import org.apache.jmeter.samplers.SampleListener;
 import org.apache.jmeter.testelement.TestStateListener;
 import org.apache.jmeter.testelement.ThreadListener;
+import org.apache.jmeter.testelement.property.JMeterProperty;
 import org.apache.jmeter.threads.AbstractThreadGroup;
 import org.apache.jmeter.threads.JMeterContextService;
 import org.apache.jmeter.threads.ThreadGroup;
@@ -15,6 +18,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.Serializable;
+import java.util.Arrays;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.concurrent.ConcurrentHashMap;
@@ -28,7 +32,7 @@ public class ThreadGroupAutoStop
     private static final Logger log = LoggerFactory.getLogger(ThreadGroupAutoStop.class);
     private final static String DELAY_SECONDS = "delay_seconds";
     private int delaySeconds = 0;
-    private final AtomicBoolean once = new AtomicBoolean(false);
+    private final ConcurrentHashMap<AbstractThreadGroup, AtomicBoolean> once = new ConcurrentHashMap<>();
     private ConcurrentHashMap<String, Long> threadGroupStartTime = new ConcurrentHashMap<>();
 
 
@@ -39,15 +43,19 @@ public class ThreadGroupAutoStop
     @Override
     public void sampleOccurred(SampleEvent se) {
         AbstractThreadGroup threadGroup = JMeterContextService.getContext().getThreadGroup();
+        if (threadGroup instanceof ThreadGroup && !((ThreadGroup) threadGroup).getScheduler()) {
+            return;
+        }
+        once.putIfAbsent(threadGroup, new AtomicBoolean(false));
+
         if (threadGroup instanceof ThreadGroup) {
-            if (!((ThreadGroup) threadGroup).getScheduler()) {
-                return;
-            }
             long startTime = threadGroupStartTime.get(threadGroup.getName());
             long duration = ((ThreadGroup) threadGroup).getDuration();
             long offset = System.currentTimeMillis() / 1000 - (startTime + duration);
+            System.out.println("ThreadGroup: " + offset);
+
             if (offset >= 0 && startTime > 0) {
-                if (!once.getAndSet(true)) {
+                if (!once.get(threadGroup).getAndSet(true)) {
                     new Timer(true).schedule(new TimerTask() {
                         public void run() {
                             threadGroup.tellThreadsToStop();
@@ -63,12 +71,40 @@ public class ThreadGroupAutoStop
             long holdSeconds = ((ConcurrencyThreadGroup) threadGroup).getHoldSeconds();
             long rampUpSeconds = ((ConcurrencyThreadGroup) threadGroup).getRampUpSeconds();
             long offset = System.currentTimeMillis() / 1000 - (startTime + holdSeconds + rampUpSeconds);
+            System.out.println("ConcurrencyThreadGroup: " + offset);
+
             if (offset >= 0 && startTime > 0) {
-                if (!once.getAndSet(true)) {
+                if (!once.get(threadGroup).getAndSet(true)) {
                     new Timer(true).schedule(new TimerTask() {
                         public void run() {
                             threadGroup.tellThreadsToStop();
                             log.info("Expected duration reached, shutdown the ConcurrencyThreadGroup");
+                            this.cancel();
+                        }
+                    }, delaySeconds * 1000L);
+                }
+            }
+        }
+        if (threadGroup instanceof UltimateThreadGroup) {
+            JMeterProperty data = ((UltimateThreadGroup) threadGroup).getData();
+            JSONArray jsonArray = JSONArray.fromObject(data.getObjectValue().toString());
+            long sum = 0;
+            for (int i = 0; i < jsonArray.size(); i++) {
+                JSONArray jsonArray1 = jsonArray.getJSONArray(i);
+                long temp = Arrays.stream(jsonArray1.toArray()).skip(1).mapToLong(item -> Long.parseLong(item.toString())).sum();
+                if (temp >= sum) {
+                    sum = temp;
+                }
+            }
+            long startTime = threadGroupStartTime.get(threadGroup.getName());
+            long offset = System.currentTimeMillis() / 1000 - (startTime + sum);
+            System.out.println("UltimateThreadGroup: " + offset);
+            if (offset >= 0 && sum > 0) {
+                if (!once.get(threadGroup).getAndSet(true)) {
+                    new Timer(true).schedule(new TimerTask() {
+                        public void run() {
+                            threadGroup.tellThreadsToStop();
+                            log.info("Expected duration reached, shutdown the UltimateThreadGroup");
                             this.cancel();
                         }
                     }, delaySeconds * 1000L);
