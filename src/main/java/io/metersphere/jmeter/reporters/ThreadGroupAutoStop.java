@@ -95,7 +95,7 @@ public class ThreadGroupAutoStop
             if (!once.get(threadGroup).getAndSet(true)) {
                 new Timer(true).schedule(new TimerTask() {
                     public void run() {
-                        threadGroup.tellThreadsToStop();
+                        threadGroup.stop();
                         log.info("Expected duration reached, shutdown the ConcurrencyThreadGroup");
                         this.cancel();
                     }
