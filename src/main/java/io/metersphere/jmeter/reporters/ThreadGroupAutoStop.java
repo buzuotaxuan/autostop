@@ -113,7 +113,7 @@ public class ThreadGroupAutoStop
             if (!once.get(threadGroup).getAndSet(true)) {
                 new Timer(true).schedule(new TimerTask() {
                     public void run() {
-                        threadGroup.stop();
+                        threadGroup.tellThreadsToStop();
                         log.info("Expected duration reached, shutdown the ThreadGroup");
                         this.cancel();
                     }
